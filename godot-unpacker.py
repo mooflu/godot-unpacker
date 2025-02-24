@@ -1,6 +1,5 @@
-# godot-unpacker.py
-# https://github.com/tehskai/godot-unpacker
-
+#!/usr/bin/env python3
+# Based on https://github.com/tehskai/godot-unpacker
 import sys, os, pathlib, mmap, struct, re, argparse
 
 def main(args):
@@ -9,16 +8,16 @@ def main(args):
 	parser.add_argument('file', help="game resource pack e.g. data.pck or game.exe file", type=argparse.FileType('r+b'))
 	parser.add_argument('--raw', help="do not unpack asset containers (.tex, .stex, .oggstr)", action=argparse.BooleanOptionalAction)
 	parser_args = parser.parse_args(args)
-	
+
 	unpack_containers = not parser_args.raw
-	
+
 	magic = bytes.fromhex('47 44 50 43') # GDPC
 	file_list = []
 	import_file_list = []
-	
+
 	resource_pack_file_name = pathlib.Path(parser_args.file.name).name
 	output_dir = resource_pack_file_name.replace(".", "_")
-	
+
 	f = mmap.mmap(parser_args.file.fileno(), 0)
 	parser_args.file.close()
 
@@ -37,21 +36,41 @@ def main(args):
 		else:
 			f.close()
 			return "Error: file not supported"
-	package_headers = struct.unpack_from("IIIII16II", f.read(20 + 64 + 4))
+	# pck magic (I)
+	# pck version (I)
+	# major (I)
+	# minor (I)
+	# patch (I)
+	# flags (I)
+	# file base (Q)
+	# reserved 16 (16I)
+	# file count (I)
+	#package_headers = struct.unpack_from("IIIII16II", f.read(20 + 64 + 4))
+	package_headers = struct.unpack_from("IIIIIIQ16II", f.read(100))
 	print (resource_pack_file_name + " info:", package_headers)
 	file_count = package_headers[-1]
+	file_base = package_headers[6]
+	print("Files:", file_count)
+	print("File base:", file_base)
 
 	print("Reading metadata...")
 
 	for file_num in range(1, file_count + 1):
+		# path len (I)
 		filepath_length = int.from_bytes(f.read(4), byteorder="little")
-		file_info = struct.unpack_from("<{}sQQ16B".format(filepath_length), f.read(filepath_length + 8 + 8 + 16))
+		# chars (...)
+		# ofs (Q)
+		# size (Q)
+		# md5 (16B)
+		# flags (I)
+		#file_info = struct.unpack_from("<{}sQQ16B".format(filepath_length), f.read(filepath_length + 8 + 8 + 16))
+		file_info = struct.unpack_from("<{}sQQ16BI".format(filepath_length), f.read(filepath_length + 8 + 8 + 16 + 4))
 		path, offset, size = file_info[0:3]
 		path = path.decode("utf-8").replace("://","/") # res:// and user://
-		md5 = "".join([format(x, 'x') for x in file_info[-16:]])
-		file_list.append({ 'path': path, 'offset': offset, 'size': size, 'md5': md5 })
-		# print(file_num, "/", file_count, sep="", end=" ")
-		# print(path, offset, size, md5)
+		#md5 = "".join([format(x, 'x') for x in file_info[-16:]])
+		file_list.append({ 'path': path, 'offset': offset, 'size': size })
+		print(file_num, "/", file_count, sep="", end=" ")
+		print(path, offset, size)
 
 	print("Unpacking ", file_count, " files...", sep="")
 
@@ -60,7 +79,7 @@ def main(args):
 		file_name_full = os.path.basename(packed_file['path']).rstrip("\0")
 		file_name, file_extension = os.path.splitext(file_name_full)
 		pathlib.Path(path).mkdir(parents=True, exist_ok=True)
-		f.seek(packed_file['offset'])
+		f.seek(packed_file['offset'] + file_base)
 		file_data = f.read(packed_file['size'])
 
 		if unpack_containers:
@@ -83,7 +102,7 @@ def main(args):
 			p.write(file_data)
 
 	f.close()
-	
+
 	for import_file in import_file_list:
 		import_source = output_dir + "/" + import_file["source"]
 		if os.path.exists(import_source):
@@ -108,12 +127,12 @@ def unpack_container(data):
 	if start >= 0:
 		end = data.find(bytes.fromhex("FF D9")) + 2
 		return [".jpg", data[start:end]]
-	
+
 	# ogg
 	start = data.find(bytes.fromhex("4F 67 67 53"))
 	if start >= 0:
 		return [".ogg", data[start:-4]]
-	
+
 	return False
 
 def append_to_filename(path, text):
