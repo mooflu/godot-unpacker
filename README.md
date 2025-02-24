@@ -1,3 +1,7 @@
+This fork should work with Godot 4.4 pck files.
+
+Alternatively consider using https://github.com/GDRETools/gdsdecomp
+
 # godot-unpacker
 godot archive unpacker for non-encrypted files
 
